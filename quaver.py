@@ -50,7 +50,7 @@ import astropy.io.fits as pyfits
 primary_correction_method = 3
 
 #Size of the TPF postage stamp to download and use for extraction and detrending.
-tpf_width_height = 35
+tpf_width_height = 50
 
 #Number of PCA Components in the Hybrid method and simple PCA correction.
 additive_pca_num = 3
@@ -79,7 +79,7 @@ bf_threshold = 1.5
 #Whether Lightkurve should attempt to propagate the flux errors during the matrix correction.
 #Note that this can significantly increase the runtime. Witout this, errors in output will be
 #photometric flux errors reported from the TESSCut and propagated only from extraction.
-prop_error_flag = True
+prop_error_flag = False
 
 ############################################
 
@@ -367,7 +367,7 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
 
             temp_min = float(pixmin)
             # print(temp_min)
-            temp_max = float(1e-3*pixmax+pixmean)
+            temp_max = float(1e-1*pixmax+pixmean)
             #temp_max = pixmax
             # print(temp_max)
 
@@ -763,7 +763,42 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
 
                 np.savetxt('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_sector'+sec+'_PCA_lc.dat',pca_corrected_lc)
                 np.savetxt('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_sector'+sec+'_simple_hybrid_lc.dat',simple_hybrid_corrected_lc)
-                np.savetxt('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_sector'+sec+'_full_hybrid_lc.dat',full_hybrid_corrected_lc)
+                np.savetxt('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_sector'+sec+'_full_hybrid_lc.dat',full_hybrid_corrected_lc)\
+                
+                # ADDED: Save a plot with all three light curves for a sector
+                fig = plt.figure(figsize=(12,8))
+
+                # Define a threshold for large gaps 
+                gap_threshold = 0.5  # Adjust this value based on your data's time scale
+
+                # Function to insert NaN for large gaps
+                def insert_nan_for_gaps(time, flux, gap_threshold):
+                    time_diff = np.diff(time)
+                    large_gaps = np.where(time_diff > gap_threshold)[0]
+                    time_with_nan = np.insert(time, large_gaps + 1, np.nan)
+                    flux_with_nan = np.insert(flux, large_gaps + 1, np.nan)
+                    return time_with_nan, flux_with_nan
+
+                # Process and plot each dataset
+                time_uncorrected, flux_uncorrected = insert_nan_for_gaps(lc.time.value, lc.flux.value - np.mean(lc.flux.value), gap_threshold)
+                plt.plot(time_uncorrected, flux_uncorrected, color='grey', label='Uncorrected', alpha=0.7, lw = 0.7)
+
+                time_simple_hybrid, flux_simple_hybrid = insert_nan_for_gaps(lc.time.value, clc.flux.value - np.mean(clc.flux.value), gap_threshold)
+                plt.plot(time_simple_hybrid, flux_simple_hybrid, color='dodgerblue', label='Simple Hybrid', alpha=0.7, lw = 0.7)
+
+                time_full_hybrid, flux_full_hybrid = insert_nan_for_gaps(lc.time.value, clc_full.flux.value - np.mean(clc_full.flux.value), gap_threshold)
+                plt.plot(time_full_hybrid, flux_full_hybrid, color='darkblue', label='Full Hybrid', alpha=0.7, lw = 0.7)
+
+                time_pca, flux_pca = insert_nan_for_gaps(lc.time.value, corrected_lc_pca_OF.flux.value - np.mean(corrected_lc_pca_OF.flux.value), gap_threshold)
+                plt.plot(time_pca, flux_pca, color='darkorange', label='PCA', alpha=0.7, lw = 0.7)
+                
+                plt.legend()
+                plt.xlabel('Time (BJD - 2457000)')
+                plt.ylabel('Relative Flux')
+                plt.title(f'{target} Sector {sec} Corrected Light Curves')
+                plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_AllLightCurves_sector'+sec+'.pdf',format='pdf')
+                plt.show()
+                plt.close(fig)
 
                 print("Sector, CCD, camera: ")
                 print(sector_number,ccd,cam)
@@ -779,6 +814,20 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                 print('Simple PCA overfit: '+str(pca_overfit_metric))
                 #print('Simple PCA underfit: '+str(pca_underfit_metric)+'\n')
 
+                # ADDED: Save the overfitting metrics to a text file
+                with open('quaver_output/'+target_safename+'/'+target_safename+'_overfitting_metrics.txt', 'a') as f:
+
+                    # write in selected pixels for aperture
+                    f.write(f'Sector {sec}:\n')
+                    f.write(f'CCD {ccd}, Camera {cam}\n')
+                    f.write(f'Selected pixels: {row_col_coords}\n')
+
+                    f.write(f'Sector {sec}:\n')
+                    f.write(f'Full Hybrid Overfit: {fh_overfit_metric}\n')
+                    f.write(f'Simple Hybrid Overfit: {sh_overfit_metric}\n')
+                    f.write(f'Simple PCA  Overfit: {pca_overfit_metric}\n\n')
+
+                    f.close()
 
                 #Plot the resultant fit (matrices multiplied by the final coefficients) for each model with the original and final curves.
                 sh_coeffs = corrector_1.coefficients
@@ -908,7 +957,6 @@ full_hybrid_lc = np.column_stack((full_lc_time_fh,full_lc_flux_fh,full_lc_err_fh
 np.savetxt('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_PCA_lc.dat',pca_lc)
 np.savetxt('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_simple_hybrid_lc.dat',simple_hybrid_lc)
 np.savetxt('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_full_hybrid_lc.dat',full_hybrid_lc)
-
 
 #Plot the corrected light curves and save images.
 fig_pca = plt.figure()
