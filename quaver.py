@@ -81,6 +81,9 @@ bf_threshold = 1.5
 #photometric flux errors reported from the TESSCut and propagated only from extraction.
 prop_error_flag = False
 
+# ADDED output directory for quaver outputs to be saved
+out_dir = '/Users/oliviapereira/Documents/MEGA/quaver_output'
+
 ############################################
 
 ############################################
@@ -728,28 +731,28 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                 directory = str(target).replace(" ","")
                 target_safename = target.replace(" ","")
                 try:
-                    os.makedirs('quaver_output/'+target_safename)
+                    os.makedirs(f'{out_dir}/'+target_safename)
                     print("Directory '% s' created\n" % directory)
                     if primary_correction_method == 1:
-                        plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_SimplePCA_sector'+sec+'.pdf',format='pdf')
+                        plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_SimplePCA_sector'+sec+'.pdf',format='pdf')
                         plt.show()
                     elif primary_correction_method == 2:
-                        plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_SimpleHybrid_sector'+sec+'.pdf',format='pdf')
+                        plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_SimpleHybrid_sector'+sec+'.pdf',format='pdf')
                         plt.show()
                     elif primary_correction_method == 3:
-                        plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_FullHybrid_sector'+sec+'.pdf',format='pdf')
+                        plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_FullHybrid_sector'+sec+'.pdf',format='pdf')
                         plt.show()
 
                 except FileExistsError:
                     print("Saving to folder '% s'\n" % directory)
                     if primary_correction_method == 1:
-                        plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_SimplePCA_sector'+sec+'.pdf',format='pdf')
+                        plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_SimplePCA_sector'+sec+'.pdf',format='pdf')
                         plt.show()
                     elif primary_correction_method == 2:
-                        plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_SimpleHybrid_sector'+sec+'.pdf',format='pdf')
+                        plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_SimpleHybrid_sector'+sec+'.pdf',format='pdf')
                         plt.show()
                     elif primary_correction_method == 3:
-                        plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_FullHybrid_sector'+sec+'.pdf',format='pdf')
+                        plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_FullHybrid_sector'+sec+'.pdf',format='pdf')
                         plt.show()
 
                 #Create saveable formats for the light curves and save to directory:
@@ -761,9 +764,9 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                 unstitched_lc_simple_hyb.append(simple_hybrid_corrected_lc)
                 unstitched_lc_full_hyb.append(full_hybrid_corrected_lc)
 
-                np.savetxt('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_sector'+sec+'_PCA_lc.dat',pca_corrected_lc)
-                np.savetxt('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_sector'+sec+'_simple_hybrid_lc.dat',simple_hybrid_corrected_lc)
-                np.savetxt('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_sector'+sec+'_full_hybrid_lc.dat',full_hybrid_corrected_lc)\
+                np.savetxt(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_sector'+sec+'_PCA_lc.dat',pca_corrected_lc)
+                np.savetxt(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_sector'+sec+'_simple_hybrid_lc.dat',simple_hybrid_corrected_lc)
+                np.savetxt(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_sector'+sec+'_full_hybrid_lc.dat',full_hybrid_corrected_lc)\
                 
                 # ADDED: Save a plot with all three light curves for a sector
                 fig = plt.figure(figsize=(12,8))
@@ -796,7 +799,7 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                 plt.xlabel('Time (BJD - 2457000)')
                 plt.ylabel('Relative Flux')
                 plt.title(f'{target} Sector {sec} Corrected Light Curves')
-                plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_AllLightCurves_sector'+sec+'.pdf',format='pdf')
+                plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_AllLightCurves_sector'+sec+'.pdf',format='pdf')
                 plt.show()
                 plt.close(fig)
 
@@ -815,7 +818,7 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                 #print('Simple PCA underfit: '+str(pca_underfit_metric)+'\n')
 
                 # ADDED: Save the overfitting metrics to a text file
-                with open('quaver_output/'+target_safename+'/'+target_safename+'_overfitting_metrics.txt', 'a') as f:
+                with open(f'{out_dir}/'+target_safename+'/'+target_safename+'_overfitting_metrics.txt', 'a') as f:
 
                     # write in selected pixels for aperture
                     f.write(f'Sector {sec}:\n')
@@ -876,7 +879,7 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                 plt.plot(lc.time.value,lc_full.flux.value,color='firebrick',label='Uncorrected')
                 plt.plot(lc.time.value,total_fit_fh,color='cyan',label='Final Model')
                 plt.legend()
-                plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_FitDiagnostic_sector_'+sec+'full_hybrid.pdf',format='pdf')
+                plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_FitDiagnostic_sector_'+sec+'full_hybrid.pdf',format='pdf')
                 plt.close()
 
                 #Plot the SH diagnostic:
@@ -895,7 +898,7 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                 clc.plot(ax=ax,color='k',label='Corrected')
                 ax.plot(lc.time.value,total_fit_sh,color='cyan',label='Multiplicative Model')
                 ax.legend()
-                plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_FitDiagnostic_sector_'+sec+'simple_hybrid.pdf',format='pdf')
+                plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_FitDiagnostic_sector_'+sec+'simple_hybrid.pdf',format='pdf')
                 plt.close()
 
                 #Plot the PCA diagnostic:
@@ -903,7 +906,7 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                 plt.plot(lc.time.value,raw_lc_OF.flux.value,color='firebrick',label='Uncorrected')
                 plt.plot(lc.time.value,total_fit_pca,color='cyan',label='Final Model')
                 plt.legend()
-                plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_FitDiagnostic_sector_'+sec+'_PCA.pdf',format='pdf')
+                plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_FitDiagnostic_sector_'+sec+'_PCA.pdf',format='pdf')
                 plt.close()
 
                 print("\nMoving to next sector.\n")
@@ -954,9 +957,9 @@ simple_hybrid_lc = np.column_stack((full_lc_time_sh,full_lc_flux_sh,full_lc_err_
 full_hybrid_lc = np.column_stack((full_lc_time_fh,full_lc_flux_fh,full_lc_err_fh))
 
 
-np.savetxt('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_PCA_lc.dat',pca_lc)
-np.savetxt('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_simple_hybrid_lc.dat',simple_hybrid_lc)
-np.savetxt('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_full_hybrid_lc.dat',full_hybrid_lc)
+np.savetxt(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_PCA_lc.dat',pca_lc)
+np.savetxt(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_simple_hybrid_lc.dat',simple_hybrid_lc)
+np.savetxt(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_full_hybrid_lc.dat',full_hybrid_lc)
 
 #Plot the corrected light curves and save images.
 fig_pca = plt.figure()
@@ -964,7 +967,7 @@ plt.errorbar(full_lc_time_pca,full_lc_flux_pca,yerr = full_lc_err_pca,marker='o'
 for i in range(0,len(unstitched_lc_pca)):
     last_time = unstitched_lc_pca[i][:,0][-1]
     plt.axvline(x=last_time,color='k',linestyle='--')
-plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_stitched_lc_pca.pdf',format='pdf')
+plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_stitched_lc_pca.pdf',format='pdf')
 if primary_correction_method == 1:
         plt.show()
 plt.close(fig_pca)
@@ -974,7 +977,7 @@ plt.errorbar(full_lc_time_sh,full_lc_flux_sh,yerr = full_lc_err_sh,marker='o',ma
 for i in range(0,len(unstitched_lc_simple_hyb)):
     last_time = unstitched_lc_simple_hyb[i][:,0][-1]
     plt.axvline(x=last_time,color='k',linestyle='--')
-plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_stitched_lc_simple_hybrid.pdf',format='pdf')
+plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_stitched_lc_simple_hybrid.pdf',format='pdf')
 if primary_correction_method == 2:
     plt.show()
 plt.close(fig_sh)
@@ -984,7 +987,7 @@ plt.errorbar(full_lc_time_fh,full_lc_flux_fh,yerr = full_lc_err_fh,marker='o',ma
 for i in range(0,len(unstitched_lc_full_hyb)):
     last_time = unstitched_lc_full_hyb[i][:,0][-1]
     plt.axvline(x=last_time,color='k',linestyle='--')
-plt.savefig('quaver_output/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_stitched_lc_full_hybrid.pdf',format='pdf')
+plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_stitched_lc_full_hybrid.pdf',format='pdf')
 if primary_correction_method == 3:
     plt.show()
 plt.close(fig_fh)
