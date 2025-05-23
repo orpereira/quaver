@@ -407,6 +407,17 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
             plt.show()
             plt.close(fig)
 
+            auto_fill = input("Auto-fill the contour and select all pixels within the border? (Y/N): ")
+            if auto_fill.strip().upper() == 'Y' and len(row_col_coords) > 2:
+                # Use skimage.draw.polygon to fill the region
+                rows, cols = zip(*row_col_coords)
+                rr, cc = polygon(rows, cols, aper_mod.shape)
+                aper_mod[rr, cc] = True
+                print(f"Auto-filled {len(rr)} pixels inside the contour.")
+            else:
+                for i in range(0, len(row_col_coords)):
+                    aper_mod[row_col_coords[i]] = True
+
             fig.canvas.mpl_disconnect(cid)
 
             buffer_pixels = []      #Define the buffer pixel region.
