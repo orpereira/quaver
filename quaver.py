@@ -9,6 +9,9 @@ from lightkurve import DesignMatrixCollection
 from lightkurve import RegressionCorrector
 from lightkurve import LightCurve
 
+# import polygon
+from skimage.draw import polygon
+
 import numpy as np
 import re
 import sys
@@ -403,7 +406,7 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
             plt.title('Define extraction pixels:')
             row_col_coords = []
             cid = fig.canvas.mpl_connect('button_press_event',onclick)
-
+            
             plt.show()
             plt.close(fig)
 
@@ -486,7 +489,24 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
 
                 if np.max(np.abs(additive_bkg.values)) > sys_threshold:   #None of the normally extracted objects has additive components with absolute values over 0.2 ish.
 
-                    redo_with_mask = input('Additive trends in the background indicate major systematics; add a cadence mask (Y/N) ?')
+                    redo_with_mask = input('Additive trends in the background indicate major systematics; add a cadence mask (Y/N/(A)utomatic) ?')
+
+                    if redo_with_mask in ['A', 'a', 'Automatic', 'automatic']:
+                        print('Automatically adding cadence mask to the light curve.')
+                        
+                        # masking out any entries in additive_bkg.values that are above 4 * the median of additive_bkg.values
+                        mask = np.abs(additive_bkg.values) >= 4 * np.nanmedian(np.abs(additive_bkg.values))
+
+                        # creating a mask for the tpf object
+                        cadence_mask = np.zeros(len(tpf.flux), dtype=bool)
+                        for i in range(len(tpf.flux)):
+                            cadence_mask[i] = np.any(mask[i])
+                        # applying the mask to the tpf object
+                        tpf = tpf[~cadence_mask]
+                        # updating the additive_bkg variable
+                        additive_bkg = DesignMatrix(tpf.flux[:, allfaint_mask]).pca(additive_hybrid_pcas)
+                        additive_bkg_and_constant = additive_bkg.append_constant()
+
 
                     if redo_with_mask == 'Y' or redo_with_mask=='y' or redo_with_mask=='YES' or redo_with_mask=='yes':
 
