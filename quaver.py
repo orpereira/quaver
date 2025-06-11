@@ -63,7 +63,9 @@ pca_only_num = 3
 #Lowest DSS contour level, as fraction of peak brightness in DSS image.
 #(For fields with bright stars, the default lowest level of 0.4 may be too high to see your faint source)
 #This number must be less than 0.65.
-lowest_dss_contour = 0.5
+lowest_dss_contour = 0.4
+
+flux_scaling = 1e-1
 
 #Acceptable threshold for systematics in additive components:
 sys_threshold = 0.2
@@ -85,7 +87,13 @@ bf_threshold = 1.5
 prop_error_flag = False
 
 # ADDED output directory for quaver outputs to be saved
-out_dir = '/Users/oliviapereira/Documents/MEGA/quaver_output'
+out_dir = '/Users/oliviapereira/Documents/MEGA/quaver_outputs_qualityflags/'
+
+# ADDED directory for saving/loading aperture selections
+aperture_dir = '/Users/oliviapereira/Documents/MEGA/quaver_apertures/'
+
+# toggle showing plots or just saving them
+show_plots = False
 
 ############################################
 
@@ -345,8 +353,6 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
         ccd = tpf.get_header()['CCD']
         cam = tpf.get_header()['CAMERA']
 
-
-
         print("Generating pixel map for sector "+sec+".\n")
 
         #Check that this object is actually on silicon and getting data (not always the case just because TESSCut says so).
@@ -373,7 +379,7 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
 
             temp_min = float(pixmin)
             # print(temp_min)
-            temp_max = float(1e-1*pixmax+pixmean)
+            temp_max = float(flux_scaling*pixmax+pixmean)
             #temp_max = pixmax
             # print(temp_max)
 
@@ -384,44 +390,123 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
             aper_buffer = aper.copy()    #For the source aperture plus a buffer region to exclude from both additive and mult. regressors
 
             aper_width = tpf[0].shape[1]
+
+            # check if the aperture file exists and load it if it does
+            aperture_file = os.path.join(aperture_dir, f"{target}_sector{sec}_aperture.txt")
+            if os.path.exists(aperture_file):
+                # Ask whether the user wants to load an existing aperture or define a new one.
+                load_aperture = input("Load existing aperture from .txt file? (Y/N): ")
+                if load_aperture.strip().upper() == 'Y':
+                    print(f"Loading aperture from {aperture_file}")
+                    with open(aperture_file, 'r') as f:
+                        row_col_coords = [tuple(map(int, line.strip().split(','))) for line in f.readlines()]
+                    aper_mod = np.zeros(tpf[0].shape[1:], dtype=bool)
+                    for y, x in row_col_coords:
+                        aper_mod[y, x] = True
+                else: 
+                    if lowest_dss_contour == 0.4:
+                        dss_levels = [0.4*dss_pixmax,0.5*dss_pixmax,0.75*dss_pixmax]
+                    elif lowest_dss_contour < 0.4:
+                        dss_levels = [lowest_dss_contour*dss_pixmax,0.4*dss_pixmax,0.5*dss_pixmax,0.75*dss_pixmax]
+                    elif lowest_dss_contour > 0.4:
+                        dss_levels = [lowest_dss_contour*dss_pixmax,0.65*dss_pixmax,0.85*dss_pixmax,0.9*dss_pixmax,0.95*dss_pixmax]
+
+                    fig = plt.figure(figsize=(8,8))
+                    ax = fig.add_subplot(111,projection=tpf_wcs)
+                    # ax.imshow(tpf.flux[plot_index].value,vmin=pixmin,vmax=1e-3*pixmax+pixmean)
+                    ax.imshow(tpf.flux[plot_index].value, vmin=temp_min,vmax=temp_max)
+                    ax.contour(dss_image[0][0].data,transform=ax.get_transform(wcs_dss),levels=dss_levels,colors='white',alpha=0.7)
+                    ax.scatter(aper_width/2.0,aper_width/2.0,marker='x',color='k',s=8)
+
+                    ax.set_xlim(-0.5,aper_width-0.5)  #This section is needed to fix the stupid plotting issue in Python 3.
+                    ax.set_ylim(-0.5,aper_width-0.5)
+
+                    plt.title('Define extraction pixels:')
+                    row_col_coords = []
+                    cid = fig.canvas.mpl_connect('button_press_event',onclick)
+                    
+                    plt.show()
+                    plt.close(fig)
+
+                    auto_fill = input("Auto-fill the contour and select all pixels within the border? (Y/N): ")
+                    if auto_fill.strip().upper() == 'Y' and len(row_col_coords) > 2:
+                        # Use skimage.draw.polygon to fill the region
+                        rows, cols = zip(*row_col_coords)
+                        rr, cc = polygon(rows, cols, aper_mod.shape)
+                        aper_mod[rr, cc] = True
+                        print(f"Auto-filled {len(rr)} pixels inside the contour.")
+                    else:
+                        for i in range(0, len(row_col_coords)):
+                            aper_mod[row_col_coords[i]] = True
+
+                    fig.canvas.mpl_disconnect(cid)
+
+                    # ask whether the selected aperture should be saved to a .txt file for later loading
+                    save_aperture = input("Save the selected aperture to a .txt file for later use? (Y/N): ")
+                    if save_aperture.strip().upper() == 'Y':
+                        # create the output directory if it doesn't exist
+                        if not os.path.exists(aperture_dir):
+                            os.makedirs(aperture_dir)
+
+                        # save the aperture coordinates to a .txt file
+                        aperture_file = os.path.join(aperture_dir, f"{target}_sector{sec}_aperture.txt")
+                        with open(aperture_file, 'w') as f:
+                            for coord in row_col_coords:
+                                f.write(f"{coord[0]},{coord[1]}\n")
+                        print(f"Aperture saved to {aperture_file}")
+
             #Plot the TPF image and the DSS contours together, to help with aperture selection, along with the starter aperture.
+            else: 
+                if lowest_dss_contour == 0.4:
+                    dss_levels = [0.4*dss_pixmax,0.5*dss_pixmax,0.75*dss_pixmax]
+                elif lowest_dss_contour < 0.4:
+                    dss_levels = [lowest_dss_contour*dss_pixmax,0.4*dss_pixmax,0.5*dss_pixmax,0.75*dss_pixmax]
+                elif lowest_dss_contour > 0.4:
+                    dss_levels = [lowest_dss_contour*dss_pixmax,0.65*dss_pixmax,0.85*dss_pixmax,0.9*dss_pixmax,0.95*dss_pixmax]
 
-            if lowest_dss_contour == 0.4:
-                dss_levels = [0.4*dss_pixmax,0.5*dss_pixmax,0.75*dss_pixmax]
-            elif lowest_dss_contour < 0.4:
-                dss_levels = [lowest_dss_contour*dss_pixmax,0.4*dss_pixmax,0.5*dss_pixmax,0.75*dss_pixmax]
-            elif lowest_dss_contour > 0.4:
-                dss_levels = [lowest_dss_contour*dss_pixmax,0.65*dss_pixmax,0.85*dss_pixmax,0.9*dss_pixmax,0.95*dss_pixmax]
+                fig = plt.figure(figsize=(8,8))
+                ax = fig.add_subplot(111,projection=tpf_wcs)
+                # ax.imshow(tpf.flux[plot_index].value,vmin=pixmin,vmax=1e-3*pixmax+pixmean)
+                ax.imshow(tpf.flux[plot_index].value, vmin=temp_min,vmax=temp_max)
+                ax.contour(dss_image[0][0].data,transform=ax.get_transform(wcs_dss),levels=dss_levels,colors='white',alpha=0.7)
+                ax.scatter(aper_width/2.0,aper_width/2.0,marker='x',color='k',s=8)
 
-            fig = plt.figure(figsize=(8,8))
-            ax = fig.add_subplot(111,projection=tpf_wcs)
-            # ax.imshow(tpf.flux[200],vmin=pixmin,vmax=1e-3*pixmax+pixmean)
-            ax.imshow(tpf.flux[plot_index].value,vmin=temp_min,vmax=temp_max)
-            ax.contour(dss_image[0][0].data,transform=ax.get_transform(wcs_dss),levels=dss_levels,colors='white',alpha=0.9)
-            ax.scatter(aper_width/2.0,aper_width/2.0,marker='x',color='k',s=8)
+                ax.set_xlim(-0.5,aper_width-0.5)  #This section is needed to fix the stupid plotting issue in Python 3.
+                ax.set_ylim(-0.5,aper_width-0.5)
 
-            ax.set_xlim(-0.5,aper_width-0.5)  #This section is needed to fix the stupid plotting issue in Python 3.
-            ax.set_ylim(-0.5,aper_width-0.5)
+                plt.title('Define extraction pixels:')
+                row_col_coords = []
+                cid = fig.canvas.mpl_connect('button_press_event',onclick)
+                
+                plt.show()
+                plt.close(fig)
 
-            plt.title('Define extraction pixels:')
-            row_col_coords = []
-            cid = fig.canvas.mpl_connect('button_press_event',onclick)
-            
-            plt.show()
-            plt.close(fig)
+                auto_fill = input("Auto-fill the contour and select all pixels within the border? (Y/N): ")
+                if auto_fill.strip().upper() == 'Y' and len(row_col_coords) > 2:
+                    # Use skimage.draw.polygon to fill the region
+                    rows, cols = zip(*row_col_coords)
+                    rr, cc = polygon(rows, cols, aper_mod.shape)
+                    aper_mod[rr, cc] = True
+                    print(f"Auto-filled {len(rr)} pixels inside the contour.")
+                else:
+                    for i in range(0, len(row_col_coords)):
+                        aper_mod[row_col_coords[i]] = True
 
-            auto_fill = input("Auto-fill the contour and select all pixels within the border? (Y/N): ")
-            if auto_fill.strip().upper() == 'Y' and len(row_col_coords) > 2:
-                # Use skimage.draw.polygon to fill the region
-                rows, cols = zip(*row_col_coords)
-                rr, cc = polygon(rows, cols, aper_mod.shape)
-                aper_mod[rr, cc] = True
-                print(f"Auto-filled {len(rr)} pixels inside the contour.")
-            else:
-                for i in range(0, len(row_col_coords)):
-                    aper_mod[row_col_coords[i]] = True
+                fig.canvas.mpl_disconnect(cid)
 
-            fig.canvas.mpl_disconnect(cid)
+                # ask whether the selected aperture should be saved to a .txt file for later loading
+                save_aperture = input("Save the selected aperture to a .txt file for later use? (Y/N): ")
+                if save_aperture.strip().upper() == 'Y':
+                    # create the output directory if it doesn't exist
+                    if not os.path.exists(aperture_dir):
+                        os.makedirs(aperture_dir)
+
+                    # save the aperture coordinates to a .txt file
+                    aperture_file = os.path.join(aperture_dir, f"{target}_sector{sec}_aperture.txt")
+                    with open(aperture_file, 'w') as f:
+                        for coord in row_col_coords:
+                            f.write(f"{coord[0]},{coord[1]}\n")
+                    print(f"Aperture saved to {aperture_file}")
 
             buffer_pixels = []      #Define the buffer pixel region.
 
@@ -487,34 +572,62 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
 
                 #Add a module to catch possible major systematics that need to be masked out before continuuing:
 
-                if np.max(np.abs(additive_bkg.values)) > sys_threshold:   #None of the normally extracted objects has additive components with absolute values over 0.2 ish.
+                if (np.max(np.abs(additive_bkg.values)) > sys_threshold) or (len(np.where(tpf.quality > 0)[0]) > 0):   #None of the normally extracted objects has additive components with absolute values over 0.2 ish.
 
-                    redo_with_mask = input('Additive trends in the background indicate major systematics; add a cadence mask (Y/N/(A)utomatic) ?')
-
+                    redo_with_mask = input('Additive trends in the background indicate major systematics; add a cadence mask (Y/(YM)ask/N/(A)utomatic) ? ')
+            
                     if redo_with_mask in ['A', 'a', 'Automatic', 'automatic']:
                         print('Automatically adding cadence mask to the light curve.')
-                        
-                        # masking out any entries in additive_bkg.values that are above 4 * the median of additive_bkg.values
-                        mask = np.abs(additive_bkg.values) >= 4 * np.nanmedian(np.abs(additive_bkg.values))
 
-                        # creating a mask for the tpf object
-                        cadence_mask = np.zeros(len(tpf.flux), dtype=bool)
-                        for i in range(len(tpf.flux)):
-                            cadence_mask[i] = np.any(mask[i])
+                        # mask exposures where the additive background is outside 100 std from the median
+                        sorted_vals = np.sort(additive_bkg.values, axis=0)
+                        n = sorted_vals.shape[0]
+                        center = n // 2
+                        half_window = 100  # 100 values total
+
+                        # Handle edge cases if n < 100
+                        if n < 100:
+                            central = sorted_vals
+                        else:
+                            central = sorted_vals[center - half_window : center + half_window, :]
+
+                        std_central = np.std(central, axis=0)
+
+                        mask = np.abs(additive_bkg.values - np.median(additive_bkg.values, axis=0)) > 1e2 * std_central
+
+                        # find the cadences where the mask is True
+                        cadence_mask = np.any(mask, axis=1)
+
                         # applying the mask to the tpf object
                         tpf = tpf[~cadence_mask]
+                        
                         # updating the additive_bkg variable
                         additive_bkg = DesignMatrix(tpf.flux[:, allfaint_mask]).pca(additive_hybrid_pcas)
                         additive_bkg_and_constant = additive_bkg.append_constant()
 
 
-                    if redo_with_mask == 'Y' or redo_with_mask=='y' or redo_with_mask=='YES' or redo_with_mask=='yes':
+                    if redo_with_mask == 'Y' or redo_with_mask == 'YM' or redo_with_mask=='y' or redo_with_mask=='YES' or redo_with_mask=='yes':
 
                         number_masked_regions = 1 #set to 1 at first, for this mask.
 
-                        fig_cm = plt.figure()
+                        fig_cm = plt.figure(dpi = 200, figsize=(12, 4))
                         ax_cm = fig_cm.add_subplot()
-                        ax_cm.plot(additive_bkg.values)
+                        ax_cm.plot(additive_bkg.values, label='Additive Background PCA Components', lw = 0.2)
+
+                        if redo_with_mask == 'YM':
+                            # show on plot where the quality flags are
+                            quality_flag_indices = np.where(tpf.quality > 0)[0]
+                            for i, idx in enumerate(quality_flag_indices):
+                                ax_cm.axvline(idx, color='red', linestyle='--', label='Quality Flag' if i == 0 else "", lw = 0.5, alpha = 0.5, zorder=0)
+
+                            # limit x axis to +-50 from where the first and last quality flags are
+                            if len(quality_flag_indices) > 0:
+                                first_quality_flag = quality_flag_indices[0]
+                                last_quality_flag = quality_flag_indices[-1]
+                                ax_cm.set_xlim(max(-50, first_quality_flag - 50), min(len(tpf.time)+50, last_quality_flag + 50))
+
+                            
+                        ax_cm.legend()
 
                         plt.title('Select first and last cadence to define mask region:')
                         masked_cadence_limits = []
@@ -552,9 +665,23 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
 
                                     print('Systematics remain; define the next masked region.')
                                     print(np.max(np.abs(additive_bkg.values)))
-                                    fig_cm = plt.figure()
+                                    fig_cm = plt.figure(dpi = 200, figsize=(12, 4))
                                     ax_cm = fig_cm.add_subplot()
                                     ax_cm.plot(additive_bkg.values)
+
+                                    if redo_with_mask == 'YM':
+                                        # show on plot where the quality flags are
+                                        quality_flag_indices = np.where(tpf.quality > 0)[0]
+                                        for i, idx in enumerate(quality_flag_indices):
+                                            ax_cm.axvline(idx, color='red', linestyle='--', label='Quality Flag' if i == 0 else "", lw = 0.5, alpha = 0.5, zorder=0)
+
+                                        # limit x axis to +-50 from where the first and last quality flags are
+                                        if len(quality_flag_indices) > 0:
+                                            first_quality_flag = quality_flag_indices[0]
+                                            last_quality_flag = quality_flag_indices[-1]
+                                            ax_cm.set_xlim(max(-1, first_quality_flag - 50), min(len(tpf.time), last_quality_flag + 50))
+
+                                    ax_cm.legend()
 
                                     plt.title('Select first and last cadence to define mask region:')
                                     masked_cadence_limits = []
@@ -766,25 +893,25 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                     print("Directory '% s' created\n" % directory)
                     if primary_correction_method == 1:
                         plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_SimplePCA_sector'+sec+'.pdf',format='pdf')
-                        plt.show()
+                        if show_plots: plt.show()
                     elif primary_correction_method == 2:
                         plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_SimpleHybrid_sector'+sec+'.pdf',format='pdf')
-                        plt.show()
+                        if show_plots: plt.show()
                     elif primary_correction_method == 3:
                         plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_FullHybrid_sector'+sec+'.pdf',format='pdf')
-                        plt.show()
+                        if show_plots: plt.show()
 
                 except FileExistsError:
                     print("Saving to folder '% s'\n" % directory)
                     if primary_correction_method == 1:
                         plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_SimplePCA_sector'+sec+'.pdf',format='pdf')
-                        plt.show()
+                        if show_plots: plt.show()
                     elif primary_correction_method == 2:
                         plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_SimpleHybrid_sector'+sec+'.pdf',format='pdf')
-                        plt.show()
+                        if show_plots: plt.show()
                     elif primary_correction_method == 3:
                         plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_FullHybrid_sector'+sec+'.pdf',format='pdf')
-                        plt.show()
+                        if show_plots: plt.show()
 
                 #Create saveable formats for the light curves and save to directory:
                 pca_corrected_lc = np.column_stack((corrected_lc_pca_OF.time.value,corrected_lc_pca_OF.flux.value,corrected_lc_pca_OF.flux_err.value))
@@ -799,8 +926,8 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                 np.savetxt(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_sector'+sec+'_simple_hybrid_lc.dat',simple_hybrid_corrected_lc)
                 np.savetxt(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_sector'+sec+'_full_hybrid_lc.dat',full_hybrid_corrected_lc)\
                 
-                # ADDED: Save a plot with all three light curves for a sector
-                fig = plt.figure(figsize=(12,8))
+                # ADDED: Save a plot with all three light curves for a sector as 4 subplots
+                fig, axs = plt.subplots(3, 1, figsize=(6, 6), dpi=300, sharex=True)
 
                 # Define a threshold for large gaps 
                 gap_threshold = 0.5  # Adjust this value based on your data's time scale
@@ -813,25 +940,54 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                     flux_with_nan = np.insert(flux, large_gaps + 1, np.nan)
                     return time_with_nan, flux_with_nan
 
-                # Process and plot each dataset
-                time_uncorrected, flux_uncorrected = insert_nan_for_gaps(lc.time.value, lc.flux.value - np.mean(lc.flux.value), gap_threshold)
-                plt.plot(time_uncorrected, flux_uncorrected, color='grey', label='Uncorrected', alpha=0.7, lw = 0.7)
+                # Helper to plot scatter with error bars, handling NaNs for gaps
+                def scatter_with_err(ax, time, flux, err, label, color):
+                    mask = ~np.isnan(time)
+                    ax.errorbar(time[mask], flux[mask], yerr=err[mask], fmt='.', ms=2, color='k', alpha=0.7, lw=0.3, zorder=0, label = label)
+                    # plot running average with window size of 20
+                    window_size = 20
+                    running_avg = np.convolve(flux[mask], np.ones(window_size)/window_size, mode='valid')
+                    t_full = time.copy()
+                    avg_full = np.full_like(t_full, np.nan, dtype=float)
+                    idx = np.where(~np.isnan(t_full))[0]
+                    avg_full[idx[window_size//2 : -(window_size//2) + 1 if window_size % 2 == 0 else -(window_size//2)]] = running_avg
+                    ax.plot(t_full, avg_full, color='r', lw=2, alpha=0.9)
+                    
+                # Uncorrected
 
+                # Simple Hybrid
                 time_simple_hybrid, flux_simple_hybrid = insert_nan_for_gaps(lc.time.value, clc.flux.value - np.mean(clc.flux.value), gap_threshold)
-                plt.plot(time_simple_hybrid, flux_simple_hybrid, color='dodgerblue', label='Simple Hybrid', alpha=0.7, lw = 0.7)
+                _, err_simple_hybrid = insert_nan_for_gaps(lc.time.value, clc.flux_err.value, gap_threshold)
+                scatter_with_err(axs[0], time_simple_hybrid, flux_simple_hybrid, err_simple_hybrid, 'Simple Hybrid', 'dodgerblue')
+                axs[0].set_ylabel('Relative Flux')
+                axs[0].set_title('Simple Hybrid')
 
+                # Full Hybrid
                 time_full_hybrid, flux_full_hybrid = insert_nan_for_gaps(lc.time.value, clc_full.flux.value - np.mean(clc_full.flux.value), gap_threshold)
-                plt.plot(time_full_hybrid, flux_full_hybrid, color='darkblue', label='Full Hybrid', alpha=0.7, lw = 0.7)
+                _, err_full_hybrid = insert_nan_for_gaps(lc.time.value, clc_full.flux_err.value, gap_threshold)
+                scatter_with_err(axs[1], time_full_hybrid, flux_full_hybrid, err_full_hybrid, 'Full Hybrid', 'darkblue')
+                axs[1].set_ylabel('Relative Flux')
+                axs[1].set_title('Full Hybrid')
 
+                # PCA
                 time_pca, flux_pca = insert_nan_for_gaps(lc.time.value, corrected_lc_pca_OF.flux.value - np.mean(corrected_lc_pca_OF.flux.value), gap_threshold)
-                plt.plot(time_pca, flux_pca, color='darkorange', label='PCA', alpha=0.7, lw = 0.7)
-                
-                plt.legend()
-                plt.xlabel('Time (BJD - 2457000)')
-                plt.ylabel('Relative Flux')
-                plt.title(f'{target} Sector {sec} Corrected Light Curves')
-                plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_AllLightCurves_sector'+sec+'.pdf',format='pdf')
-                plt.show()
+                _, err_pca = insert_nan_for_gaps(lc.time.value, corrected_lc_pca_OF.flux_err.value, gap_threshold)
+                scatter_with_err(axs[2], time_pca, flux_pca, err_pca, 'PCA', 'darkorange')
+                axs[2].set_ylabel('Relative Flux')
+                axs[2].set_title('PCA')
+                axs[2].set_xlabel('Time (BJD - 2457000)')
+
+                for ax in axs:
+                    ax.legend(loc='upper right', fontsize=8)
+                    ax.set_xlim(lc.time.value[0] - 1, lc.time.value[-1] + 1)
+
+                    # turn on grid
+                    ax.grid(True, linestyle='--', alpha=0.3)
+
+                plt.suptitle(f'{target} Sector {sec} Corrected Light Curves')
+                plt.tight_layout(rect=[0, 0, 1, 0.97])
+                plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_AllLightCurves_sector'+sec+'.png', format='png')
+                if show_plots: plt.show()
                 plt.close(fig)
 
                 print("Sector, CCD, camera: ")
@@ -999,7 +1155,7 @@ for i in range(0,len(unstitched_lc_pca)):
     last_time = unstitched_lc_pca[i][:,0][-1]
     plt.axvline(x=last_time,color='k',linestyle='--')
 plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_stitched_lc_pca.pdf',format='pdf')
-if primary_correction_method == 1:
+if primary_correction_method == 1 and show_plots:
         plt.show()
 plt.close(fig_pca)
 
@@ -1009,7 +1165,7 @@ for i in range(0,len(unstitched_lc_simple_hyb)):
     last_time = unstitched_lc_simple_hyb[i][:,0][-1]
     plt.axvline(x=last_time,color='k',linestyle='--')
 plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_stitched_lc_simple_hybrid.pdf',format='pdf')
-if primary_correction_method == 2:
+if primary_correction_method == 2 and show_plots:
     plt.show()
 plt.close(fig_sh)
 
@@ -1019,7 +1175,7 @@ for i in range(0,len(unstitched_lc_full_hyb)):
     last_time = unstitched_lc_full_hyb[i][:,0][-1]
     plt.axvline(x=last_time,color='k',linestyle='--')
 plt.savefig(f'{out_dir}/'+target_safename+'/'+target_safename+'_cycle'+str(cycle)+'_stitched_lc_full_hybrid.pdf',format='pdf')
-if primary_correction_method == 3:
+if primary_correction_method == 3 and show_plots:
     plt.show()
 plt.close(fig_fh)
 
