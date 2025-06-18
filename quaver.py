@@ -1,6 +1,8 @@
-######
-######
 import os
+# from astropy.utils.data import conf
+# conf.remote_timeout = 30  # Increase timeout to 30 seconds
+# os.environ["ASTROPY_COORDS_SESAME_URL"] = "http://cdsweb.u-strasbg.fr/cgi-bin/nph-sesame/-oxp/~?%s"
+
 import http
 #import lightkurve as lk
 from lightkurve import search_tesscut
@@ -16,11 +18,13 @@ import numpy as np
 import re
 import sys
 from copy import deepcopy
+import ast
 
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
 from matplotlib import patches
 
+from astroquery.simbad import Simbad
 from astroquery.skyview import SkyView
 from astropy.coordinates import get_icrs_coordinates
 from astropy.coordinates.name_resolve import NameResolveError
@@ -82,18 +86,19 @@ plot_index = 200
 bf_threshold = 1.5
 
 #Whether Lightkurve should attempt to propagate the flux errors during the matrix correction.
-#Note that this can significantly increase the runtime. Witout this, errors in output will be
+#Note that this can significantly increase the runtime. Without this, errors in output will be
 #photometric flux errors reported from the TESSCut and propagated only from extraction.
 prop_error_flag = False
 
 # ADDED output directory for quaver outputs to be saved
-out_dir = '/Users/oliviapereira/Documents/MEGA/quaver_outputs_qualityflags/'
+out_dir = '/Users/oliviapereira/Documents/MEGA/quaver_outputs_stars/'
 
-# ADDED directory for saving/loading aperture selections
+# ADDED directory for saving/loading aperture and cadence masking selections 
 aperture_dir = '/Users/oliviapereira/Documents/MEGA/quaver_apertures/'
+mask_dir = '/Users/oliviapereira/Documents/MEGA/quaver_masks/'
 
 # toggle showing plots or just saving them
-show_plots = False
+show_plots = True
 
 ############################################
 
@@ -137,6 +142,24 @@ def onclick_cm(event):
     fig_cm.canvas.draw()
 
 #############################################
+
+############################################
+#Define function to resolve the target name or coordinates to ICRS coordinates.
+#This function will first try to use the astropy name resolver, and if it fails, it will use astroquery.simbad.
+def resolve_target(target):
+    try:
+        return get_icrs_coordinates(target)
+    except NameResolveError:
+        print("Astropy name resolver failed, trying astroquery.simbad...")
+        result = Simbad.query_object(target)
+        if result is not None:
+            ra = result['RA'][0]
+            dec = result['DEC'][0]
+            # Convert to decimal degrees
+            coord = SkyCoord(f"{ra} {dec}", unit=(u.hourangle, u.deg), frame='icrs')
+            return coord
+        else:
+            raise NameResolveError(f"Could not resolve target '{target}' with Simbad.")
 
 #############################################
 #Define function for stitching the sectors together once corrected:
@@ -216,7 +239,7 @@ def remove_jumps(t,f,err):
 try :
     target = input('Target Common Name: ')
     target_coordinates = target
-    source_coordinates = get_icrs_coordinates(target)       #this requires that SIMBAD be up and working...
+    source_coordinates = resolve_target(target)       #this requires that SIMBAD be up and working...
     print(source_coordinates)
     print("\n")
 
@@ -435,6 +458,10 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                         rr, cc = polygon(rows, cols, aper_mod.shape)
                         aper_mod[rr, cc] = True
                         print(f"Auto-filled {len(rr)} pixels inside the contour.")
+
+                        # edit row_col_coords to match the filled region
+                        row_col_coords = [(r, c) for r, c in zip(rr, cc)]
+                        
                     else:
                         for i in range(0, len(row_col_coords)):
                             aper_mod[row_col_coords[i]] = True
@@ -574,7 +601,38 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
 
                 if (np.max(np.abs(additive_bkg.values)) > sys_threshold) or (len(np.where(tpf.quality > 0)[0]) > 0):   #None of the normally extracted objects has additive components with absolute values over 0.2 ish.
 
-                    redo_with_mask = input('Additive trends in the background indicate major systematics; add a cadence mask (Y/(YM)ask/N/(A)utomatic) ? ')
+                    redo_with_mask = input('Additive trends in the background indicate major systematics; add a cadence mask (Y/N/(A)utomatic/(L)oad) ? ')
+
+                    if redo_with_mask in ['L', 'l', 'Load', 'load']:
+                        print('Loading cadence mask from file.')
+
+                        mask_file = os.path.join(mask_dir, f"{target}_sector{sec}_mask.txt")
+                        if os.path.exists(mask_file):
+                            with open(mask_file, 'r') as f:
+                                all_mask_limits = []
+                                for line in f:
+                                    line = line.strip()
+                                    if not line:
+                                        continue  # skip empty lines
+                                    parts = line.split(',')
+                                    if len(parts) == 2:
+                                        try:
+                                            start = int(parts[0])
+                                            end = int(parts[1])
+
+                                            cadence_mask = np.zeros(len(tpf.time), dtype=bool)
+                                            # Clamp to valid range
+                                            start = max(0, int(start))
+                                            end = min(len(tpf.time) - 1, int(end))
+                                            if start <= end:
+                                                cadence_mask[start:end+1] = True
+                                            tpf = tpf[~cadence_mask]
+                                            
+                                        except ValueError:
+                                            continue  # skip malformed lines
+
+                            additive_bkg = DesignMatrix(tpf.flux[:, allfaint_mask]).pca(additive_hybrid_pcas)
+                            additive_bkg_and_constant = additive_bkg.append_constant()
             
                     if redo_with_mask in ['A', 'a', 'Automatic', 'automatic']:
                         print('Automatically adding cadence mask to the light curve.')
@@ -606,25 +664,28 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                         additive_bkg_and_constant = additive_bkg.append_constant()
 
 
-                    if redo_with_mask == 'Y' or redo_with_mask == 'YM' or redo_with_mask=='y' or redo_with_mask=='YES' or redo_with_mask=='yes':
+                    if redo_with_mask in ['Y', 'y', 'Yes', 'yes']:
 
                         number_masked_regions = 1 #set to 1 at first, for this mask.
 
+                        all_mask_limits = []
+
                         fig_cm = plt.figure(dpi = 200, figsize=(12, 4))
                         ax_cm = fig_cm.add_subplot()
+
+                        # plot additive background values vs time
                         ax_cm.plot(additive_bkg.values, label='Additive Background PCA Components', lw = 0.2)
 
-                        if redo_with_mask == 'YM':
-                            # show on plot where the quality flags are
-                            quality_flag_indices = np.where(tpf.quality > 0)[0]
-                            for i, idx in enumerate(quality_flag_indices):
-                                ax_cm.axvline(idx, color='red', linestyle='--', label='Quality Flag' if i == 0 else "", lw = 0.5, alpha = 0.5, zorder=0)
+                        # show on plot where the quality flags are
+                        quality_flag_indices = np.where(tpf.quality > 0)[0]
+                        for i, idx in enumerate(quality_flag_indices):
+                            ax_cm.axvline(idx, color='red', linestyle='--', label='Quality Flag' if i == 0 else "", lw = 0.5, alpha = 0.5, zorder=0)
 
-                            # limit x axis to +-50 from where the first and last quality flags are
-                            if len(quality_flag_indices) > 0:
-                                first_quality_flag = quality_flag_indices[0]
-                                last_quality_flag = quality_flag_indices[-1]
-                                ax_cm.set_xlim(max(-50, first_quality_flag - 50), min(len(tpf.time)+50, last_quality_flag + 50))
+                        # limit x axis to +-100 from where the first and last quality flags are
+                        if len(quality_flag_indices) > 0:
+                            first_quality_flag = quality_flag_indices[0]
+                            last_quality_flag = quality_flag_indices[-1]
+                            ax_cm.set_xlim(max(-100, first_quality_flag - 100), min(len(tpf.time)+100, last_quality_flag + 100))
 
                             
                         ax_cm.legend()
@@ -632,6 +693,8 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                         plt.title('Select first and last cadence to define mask region:')
                         masked_cadence_limits = []
                         cid_cm = fig_cm.canvas.mpl_connect('button_press_event',onclick_cm)
+
+                        all_mask_limits.append(masked_cadence_limits)
 
                         plt.show()
                         plt.close(fig_cm)
@@ -657,62 +720,77 @@ for i in range(0,len(list_sectordata_index_in_cycle)):
                             print(np.max(np.abs(additive_bkg.values)))
 
 
-                            for i in range(0,max_masked_regions):
+                        for i in range(0,max_masked_regions):
 
-                                if np.max(np.abs(additive_bkg.values)) > sys_threshold  and number_masked_regions <= max_masked_regions:
+                            if np.max(np.abs(additive_bkg.values)) > sys_threshold  and number_masked_regions <= max_masked_regions:
 
-                                    number_masked_regions += 1
+                                number_masked_regions += 1
 
-                                    print('Systematics remain; define the next masked region.')
-                                    print(np.max(np.abs(additive_bkg.values)))
-                                    fig_cm = plt.figure(dpi = 200, figsize=(12, 4))
-                                    ax_cm = fig_cm.add_subplot()
-                                    ax_cm.plot(additive_bkg.values)
+                                print('Systematics remain; define the next masked region.')
+                                print(np.max(np.abs(additive_bkg.values)))
+                                fig_cm = plt.figure(dpi = 200, figsize=(12, 4))
+                                ax_cm = fig_cm.add_subplot()
+                                ax_cm.plot(additive_bkg.values)
 
-                                    if redo_with_mask == 'YM':
-                                        # show on plot where the quality flags are
-                                        quality_flag_indices = np.where(tpf.quality > 0)[0]
-                                        for i, idx in enumerate(quality_flag_indices):
-                                            ax_cm.axvline(idx, color='red', linestyle='--', label='Quality Flag' if i == 0 else "", lw = 0.5, alpha = 0.5, zorder=0)
+                                # show on plot where the quality flags are
+                                quality_flag_indices = np.where(tpf.quality > 0)[0]
+                                for i, idx in enumerate(quality_flag_indices):
+                                    ax_cm.axvline(idx, color='red', linestyle='--', label='Quality Flag' if i == 0 else "", lw = 0.5, alpha = 0.5, zorder=0)
 
-                                        # limit x axis to +-50 from where the first and last quality flags are
-                                        if len(quality_flag_indices) > 0:
-                                            first_quality_flag = quality_flag_indices[0]
-                                            last_quality_flag = quality_flag_indices[-1]
-                                            ax_cm.set_xlim(max(-1, first_quality_flag - 50), min(len(tpf.time), last_quality_flag + 50))
+                                # limit x axis to +-100 from where the first and last quality flags are
+                                if len(quality_flag_indices) > 0:
+                                    first_quality_flag = quality_flag_indices[0]
+                                    last_quality_flag = quality_flag_indices[-1]
+                                    ax_cm.set_xlim(max(-1, first_quality_flag - 100), min(len(tpf.time), last_quality_flag + 100))
 
-                                    ax_cm.legend()
+                                ax_cm.legend()
 
-                                    plt.title('Select first and last cadence to define mask region:')
-                                    masked_cadence_limits = []
-                                    cid_cm = fig_cm.canvas.mpl_connect('button_press_event',onclick_cm)
+                                plt.title('Select first and last cadence to define mask region:')
+                                masked_cadence_limits = []
+                                cid_cm = fig_cm.canvas.mpl_connect('button_press_event',onclick_cm)
 
-                                    plt.show()
-                                    plt.close(fig_cm)
+                                plt.show()
+                                plt.close(fig_cm)
 
-                                    if len(masked_cadence_limits) != 0:
+                                all_mask_limits.append(masked_cadence_limits)
 
-
-                                        if masked_cadence_limits[0] >= 0:
-                                            first_timestamp = tpf.time[masked_cadence_limits[0]].value
-                                        else:
-                                            first_timestamp = 0
-                                        if masked_cadence_limits[1] < len(tpf.time) -1:
-                                            last_timestamp = tpf.time[masked_cadence_limits[1]].value
-                                        else:
-                                            last_timestamp = tpf.time[-1].value
+                                if len(masked_cadence_limits) != 0:
 
 
-                                        cadence_mask = ~((tpf.time.value >= first_timestamp) & (tpf.time.value <= last_timestamp))
-
-                                        tpf = tpf[cadence_mask]
-
-                                        additive_bkg = DesignMatrix(tpf.flux[:, allfaint_mask]).pca(additive_hybrid_pcas)
-                                        additive_bkg_and_constant = additive_bkg.append_constant()
-
+                                    if masked_cadence_limits[0] >= 0:
+                                        first_timestamp = tpf.time[masked_cadence_limits[0]].value
                                     else:
+                                        first_timestamp = 0
+                                    if masked_cadence_limits[1] < len(tpf.time) -1:
+                                        last_timestamp = tpf.time[masked_cadence_limits[1]].value
+                                    else:
+                                        last_timestamp = tpf.time[-1].value
 
-                                        number_masked_regions = max_masked_regions+1    #stops the loop if the user no longer wishes to add more regions.
+
+                                    cadence_mask = ~((tpf.time.value >= first_timestamp) & (tpf.time.value <= last_timestamp))
+
+                                    tpf = tpf[cadence_mask]
+
+                                    additive_bkg = DesignMatrix(tpf.flux[:, allfaint_mask]).pca(additive_hybrid_pcas)
+                                    additive_bkg_and_constant = additive_bkg.append_constant()
+
+                                else:
+                                    number_masked_regions = max_masked_regions+1    #stops the loop if the user no longer wishes to add more regions.
+
+                        # ask if cadence mask should be saved to a file
+                        save_mask = input("Save the cadence mask to a .txt file for later use? (Y/N): ")
+                        if save_mask.strip().upper() == 'Y':
+                            # create the output directory if it doesn't exist
+                            if not os.path.exists(mask_dir):
+                                os.makedirs(mask_dir)
+
+                            # save the cadence mask to a .txt file
+                            mask_file = os.path.join(mask_dir, f"{target}_sector{sec}_mask.txt")
+                            with open(mask_file, 'w') as f:
+                                for limits in all_mask_limits:
+                                    f.write(f"{limits[0]},{limits[1]}\n")
+                            print(f"Cadence mask saved to {mask_file}")
+
 
                 # Now we correct all the bright pixels EXCLUDING THE SOURCE by the background, so we can find the remaining multiplicative trend
 
